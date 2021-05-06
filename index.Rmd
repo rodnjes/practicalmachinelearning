@@ -1,0 +1,167 @@
+---
+title: "Can Fitness Devices Determine if Exercise is Done Correctly"
+author: "Jessica Hyde"
+date: "06/05/2021"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+# Summary
+
+Peolpe often wear exercise gadgets to determine how much exercise they do, but not if they are exercising correctly.  This analysis will see if fitness trackers can determine if barbell lifts are performed correctly or incorrectly.  The model that was selected was a random forest one, which was able to achieve high accuracy on the training and cross-validation set. 
+
+## Different classifications trackers are tested on
+
+* A: exactly according to the specification
+
+* B: throwing the elbows to the front
+
+* C: lifting the dumbbell only halfway
+
+* D: lowering the dumbbell only halfway
+
+* E: throwing the hips to the front
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## libaries used
+
+```{r loadLibraries}
+library(caret)
+
+```
+
+# preparing the data for modeling
+
+## data 
+
+First I downloaded the data from the websites below and then make them available to R
+
+```{r data}
+
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv","pml-training.csv")
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv","pml-testing.csv")
+
+trainingRaw <- read.csv("pml-training.csv")
+testingRaw <- read.csv("pml-testing.csv")
+```
+
+## clean the data
+
+For this analysis I will be using the numeric data points that are not missing data.  I will also remove columns which do not
+make sence in affecting the measurments of exercise correctness, such as date, index, and window variables
+
+```{r clean}
+
+#remove NA's
+
+training <- trainingRaw[, colSums(is.na(trainingRaw)) == 0]
+testing <- testingRaw[, colSums(is.na(testingRaw)) == 0]
+
+# remove non numeric data but keel the training classifications
+training <- cbind(training[, sapply(training, is.numeric)],factor(training$classe))
+colnames(training)[57] <- "classe"
+testing <- testing[, sapply(testing, is.numeric)]
+
+# remove index, timestaps and window columns as they should not affect analysis
+training <- training[, !grepl("^X|timestamp|window", names(training))]
+testing <- testing[, !grepl("^X|timestamp|window", names(testing))]
+
+# enusre no data is near zero value
+nearZeroVar(testing)
+nearZeroVar(training)
+
+```
+## Slice the training data into 2 sets for testing 
+
+I will slice the training data into 2 sets, 75%  for training models and 25% for cross validation of the model.  
+
+```{r divideTraining}
+
+set.seed(13)
+inTrain <- caret::createDataPartition(training$classe,p=3/4,list=FALSE)
+
+trainData <- training[inTrain,]
+validData <- training[-inTrain,]
+```
+
+# Modeling the Data
+I am going to try 3 different decision tree methods to find the model that fits the data best. (Please note it may take some time to run all 3)
+
+* Classification and Regression Tree (CART)
+* Gradient Boosting Machine Tree (CBM)
+* Random Forest Tree (RF)
+
+```{r models}
+
+varNames <-names(trainData)[1:length(trainData)-1]
+
+CARTmodel <- train(
+  classe ~ ., 
+  data=trainData[, c('classe', varNames)],
+  method='rpart'
+)
+
+GBMmodel <- train(
+  classe ~ ., 
+  data=trainData[, c('classe',varNames )],
+  method='gbm'
+)
+
+RFmodel <- train(
+  classe ~ ., 
+  data=trainData[, c('classe', varNames)],
+  method='rf',
+)
+
+```
+
+## Evaluate the accuracy of the models on the training and the crossvalidation data
+
+```{r evaluate}
+
+trainingPredCART <- predict(CARTmodel, trainData)
+trainConfusionMatrixCART<-confusionMatrix(trainingPredCART, trainData$classe)
+trainingPredGBM <- predict(GBMmodel, trainData)
+trainConfusionMatrixGBM<-confusionMatrix(trainingPredGBM, trainData$classe)
+trainingPredRF <- predict(RFmodel, trainData)
+trainConfusionMatrixRF<-confusionMatrix(trainingPredRF, trainData$classe)
+
+validPredCART <- predict(CARTmodel, validData)
+validConfusionMatrixCART<-confusionMatrix(validPredCART, validData$classe)
+validPredGBM <- predict(GBMmodel, validData)
+validConfusionMatrixGBM<-confusionMatrix(validPredGBM, validData$classe)
+validPredRF <- predict(RFmodel, validData)
+validConfusionMatrixRF<-confusionMatrix(validPredRF, validData$classe)
+
+AccuracyResults <- data.frame(
+  Model = c('training CART', 'training GBM', 'training RF','cross-validate CART', 'cross-validate GBM', 'cross-validate RF'),
+  Accuracy = rbind(trainConfusionMatrixCART$overall[1], trainConfusionMatrixGBM$overall[1], trainConfusionMatrixRF$overall[1], validConfusionMatrixCART$overall[1], validConfusionMatrixGBM$overall[1], validConfusionMatrixRF$overall[1])
+)
+print(AccuracyResults)
+```
+Looking at the different models, the most accurate model when it comes to the cross-validated data is the random forest tree model.
+
+
+```{R winningModel}
+
+RFmodel$finalModel
+
+```
+# Prediction
+```{R prediction}
+
+prediction <-predict(RFmodel,testing)
+results <- data.frame(id = testing$problem_id,predicted = prediction)
+
+print(results)
+
+```
+
+# Conclusion
+By training a random forest model to a high accuracy level, predictions can by looking at exercise gadget data as to whether one is exercising correctly or not.
+
